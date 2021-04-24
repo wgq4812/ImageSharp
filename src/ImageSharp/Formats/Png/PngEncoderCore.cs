@@ -16,6 +16,7 @@ using SixLabors.ImageSharp.Formats.Png.Zlib;
 using SixLabors.ImageSharp.Memory;
 using SixLabors.ImageSharp.Metadata;
 using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ZlibStream;
 
 namespace SixLabors.ImageSharp.Formats.Png
 {
@@ -745,27 +746,24 @@ namespace SixLabors.ImageSharp.Formats.Png
                     textBytes.CopyTo(outputBytes.Slice(translatedKeywordStart + translatedKeyword.Length + 1));
                     this.WriteChunk(stream, PngChunkType.InternationalText, outputBytes.ToArray());
                 }
+                else if (textData.Value.Length > this.options.TextCompressionThreshold)
+                {
+                    // Write zTXt chunk.
+                    byte[] compressedData =
+                        this.GetCompressedTextBytes(PngConstants.Encoding.GetBytes(textData.Value));
+                    Span<byte> outputBytes = new byte[textData.Keyword.Length + compressedData.Length + 2];
+                    PngConstants.Encoding.GetBytes(textData.Keyword).CopyTo(outputBytes);
+                    compressedData.CopyTo(outputBytes.Slice(textData.Keyword.Length + 2));
+                    this.WriteChunk(stream, PngChunkType.CompressedText, outputBytes.ToArray());
+                }
                 else
                 {
-                    if (textData.Value.Length > this.options.TextCompressionThreshold)
-                    {
-                        // Write zTXt chunk.
-                        byte[] compressedData =
-                            this.GetCompressedTextBytes(PngConstants.Encoding.GetBytes(textData.Value));
-                        Span<byte> outputBytes = new byte[textData.Keyword.Length + compressedData.Length + 2];
-                        PngConstants.Encoding.GetBytes(textData.Keyword).CopyTo(outputBytes);
-                        compressedData.CopyTo(outputBytes.Slice(textData.Keyword.Length + 2));
-                        this.WriteChunk(stream, PngChunkType.CompressedText, outputBytes.ToArray());
-                    }
-                    else
-                    {
-                        // Write tEXt chunk.
-                        Span<byte> outputBytes = new byte[textData.Keyword.Length + textData.Value.Length + 1];
-                        PngConstants.Encoding.GetBytes(textData.Keyword).CopyTo(outputBytes);
-                        PngConstants.Encoding.GetBytes(textData.Value)
-                            .CopyTo(outputBytes.Slice(textData.Keyword.Length + 1));
-                        this.WriteChunk(stream, PngChunkType.Text, outputBytes.ToArray());
-                    }
+                    // Write tEXt chunk.
+                    Span<byte> outputBytes = new byte[textData.Keyword.Length + textData.Value.Length + 1];
+                    PngConstants.Encoding.GetBytes(textData.Keyword).CopyTo(outputBytes);
+                    PngConstants.Encoding.GetBytes(textData.Value)
+                        .CopyTo(outputBytes.Slice(textData.Keyword.Length + 1));
+                    this.WriteChunk(stream, PngChunkType.Text, outputBytes.ToArray());
                 }
             }
         }
@@ -777,15 +775,13 @@ namespace SixLabors.ImageSharp.Formats.Png
         /// <returns>The compressed text byte array.</returns>
         private byte[] GetCompressedTextBytes(byte[] textBytes)
         {
-            using (var memoryStream = new MemoryStream())
+            using var memoryStream = new MemoryStream();
+            using (var deflateStream = new ZlibOutputStream(memoryStream, (CompressionLevel)(int)this.options.CompressionLevel))
             {
-                using (var deflateStream = new ZlibDeflateStream(this.memoryAllocator, memoryStream, this.options.CompressionLevel))
-                {
-                    deflateStream.Write(textBytes);
-                }
-
-                return memoryStream.ToArray();
+                deflateStream.Write(textBytes);
             }
+
+            return memoryStream.ToArray();
         }
 
         /// <summary>
@@ -877,7 +873,7 @@ namespace SixLabors.ImageSharp.Formats.Png
 
             using (var memoryStream = new MemoryStream())
             {
-                using (var deflateStream = new ZlibDeflateStream(this.memoryAllocator, memoryStream, this.options.CompressionLevel))
+                using (var deflateStream = new ZlibOutputStream(memoryStream, (CompressionLevel)(int)this.options.CompressionLevel))
                 {
                     if (this.options.InterlaceMethod == PngInterlaceMode.Adam7)
                     {
@@ -967,7 +963,7 @@ namespace SixLabors.ImageSharp.Formats.Png
         /// <param name="pixels">The pixels.</param>
         /// <param name="quantized">The quantized pixels span.</param>
         /// <param name="deflateStream">The deflate stream.</param>
-        private void EncodePixels<TPixel>(Image<TPixel> pixels, IndexedImageFrame<TPixel> quantized, ZlibDeflateStream deflateStream)
+        private void EncodePixels<TPixel>(Image<TPixel> pixels, IndexedImageFrame<TPixel> quantized, ZlibOutputStream deflateStream)
             where TPixel : unmanaged, IPixel<TPixel>
         {
             int bytesPerScanline = this.CalculateScanlineLength(this.width);
@@ -991,7 +987,7 @@ namespace SixLabors.ImageSharp.Formats.Png
         /// <typeparam name="TPixel">The type of the pixel.</typeparam>
         /// <param name="pixels">The pixels.</param>
         /// <param name="deflateStream">The deflate stream.</param>
-        private void EncodeAdam7Pixels<TPixel>(Image<TPixel> pixels, ZlibDeflateStream deflateStream)
+        private void EncodeAdam7Pixels<TPixel>(Image<TPixel> pixels, ZlibOutputStream deflateStream)
             where TPixel : unmanaged, IPixel<TPixel>
         {
             int width = pixels.Width;
@@ -1046,7 +1042,7 @@ namespace SixLabors.ImageSharp.Formats.Png
         /// <typeparam name="TPixel">The type of the pixel.</typeparam>
         /// <param name="quantized">The quantized.</param>
         /// <param name="deflateStream">The deflate stream.</param>
-        private void EncodeAdam7IndexedPixels<TPixel>(IndexedImageFrame<TPixel> quantized, ZlibDeflateStream deflateStream)
+        private void EncodeAdam7IndexedPixels<TPixel>(IndexedImageFrame<TPixel> quantized, ZlibOutputStream deflateStream)
             where TPixel : unmanaged, IPixel<TPixel>
         {
             int width = quantized.Width;
