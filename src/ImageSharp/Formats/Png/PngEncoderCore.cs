@@ -873,7 +873,13 @@ namespace SixLabors.ImageSharp.Formats.Png
 
             using (var memoryStream = new MemoryStream())
             {
-                using (var deflateStream = new ZlibOutputStream(memoryStream, (CompressionLevel)(int)this.options.CompressionLevel))
+                var options = new ZlibOptions
+                {
+                    CompressionStrategy = CompressionStrategy.Rle,
+                    CompressionLevel = (CompressionLevel)(int)this.options.CompressionLevel
+                };
+
+                using (var deflateStream = new ZlibOutputStream(memoryStream, options))
                 {
                     if (this.options.InterlaceMethod == PngInterlaceMode.Adam7)
                     {
